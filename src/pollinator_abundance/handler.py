@@ -1,9 +1,11 @@
 import csv
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 from datetime import datetime
 from io import StringIO
+
 
 import numpy as np
 from importlib.resources import files
@@ -58,6 +60,12 @@ DATA_BEE_STR = """
     Hylaeus hyalinatus\t1\t0\t0\t0\t1\t0\t0\t0.33\t909.09\t1\t9283\t1.2\t4\t5\t9\t0
     Apis Mellifera\t1\t0\t0\t0\t0\t0\t0\t0.33\t3300.09\t1\t9283\t1.2\t4\t5\t9\t1
     """.strip()
+
+def wrapper_lambda_bee(args):
+    """
+    Helper function to unpack tuple of arguments for the lambda_bee function
+    """
+    return lambda_bee(*args)
 
 
 def parse_lambda_event(event):
@@ -655,35 +663,36 @@ def pollinator_abundance_calculation():
             pa_bees_image_ns = {ns_col: None for ns_col in NS_COLUMNS}
             ns_images = {ns_col: None for ns_col in NS_COLUMNS}
             total_ns_count = {ns_col: 0 for ns_col in NS_COLUMNS}
-            max_threads = 2
             total_bee = 0
 
             dict_of_results["bee_data"] = bee_data
 
-            print("Running ThreadPool")
+            max_processes = multiprocessing.cpu_count()
 
-            with ThreadPoolExecutor(max_workers=max_threads) as executor:
-                futures = [
-                    executor.submit(
-                        lambda_bee,
-                        plantation_id,
-                        bee,
-                        clc_values_roi,
-                        clc_values_ca,
-                        roi,
-                        ca,
-                        ratio_x,
-                        ratio_y,
-                        min_res,
-                        image_url_fa,
-                        NS_COLUMNS,
-                        multicore,
-                        plantations_polygons_id,
-                        override_bee,
-                        how,
-                    )
-                    for bee in bee_data
-                ]
+            arg_list = [
+                (
+                    plantation_id,
+                    bee,
+                    clc_values_roi,
+                    clc_values_ca,
+                    roi,
+                    ca,
+                    ratio_x,
+                    ratio_y,
+                    min_res,
+                    image_url_fa,
+                    NS_COLUMNS,
+                    multicore,
+                    plantations_polygons_id,
+                    override_bee,
+                    how,
+                )
+                for bee in bee_data
+            ]
+
+            with ProcessPoolExecutor(max_workers=max_processes) as executor:
+                futures = [executor.submit(wrapper_lambda_bee, args) for args in arg_list]
+
                 for future in futures:
                     ns_name, pa_image, ns_image = future.result()
                     if pa_image is not None:
